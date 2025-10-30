@@ -96,6 +96,47 @@ const MONGODB_URI = process.env.VITE_MONGODB_URI || 'mongodb://localhost:27017/p
 app.use(cors());
 app.use(express.json());
 
+// Gemini API proxy endpoint for security
+app.post('/api/gemini/chat', async (req, res) => {
+  try {
+    const { message, contextData } = req.body;
+    
+    // Use environment variable or fallback to hardcoded key for now
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AIzaSyDhntT70uByTK-K0ql-7dUzsIJXLRuUYPs";
+    
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: message
+            }]
+          }]
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Gemini API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    res.json(data);
+    
+  } catch (error) {
+    console.error('Gemini API proxy error:', error);
+    res.status(500).json({ 
+      error: 'Failed to get AI response',
+      message: error.message 
+    });
+  }
+});
+
 // Connect to MongoDB
 mongoose.connect(MONGODB_URI)
   .then(() => console.log('✅ MongoDB connected successfully'))

@@ -59,15 +59,23 @@ const ProjectsManagement = () => {
       toast.success("Project created successfully!");
       
       // Store the new project data in sessionStorage for the AI to access
-      sessionStorage.setItem('newProjectData', JSON.stringify({
+      const projectDataForAnalysis = {
+        id: newProject._id,
         title: newProject.title,
         description: newProject.description,
         teamMembers: newProject.teamMembers,
         deadline: newProject.deadline,
-        createdAt: new Date().toISOString()
-      }));
+        status: newProject.status,
+        progress: newProject.progress,
+        createdAt: newProject.createdAt || new Date().toISOString(),
+        source: 'ProjectDetails' // Indicate this came from the form
+      };
+      
+      sessionStorage.setItem('newProjectData', JSON.stringify(projectDataForAnalysis));
+      console.log('🔗 ProjectDetails: Stored project data for analysis page:', projectDataForAnalysis);
       
       // Navigate to project analysis page
+      console.log('🔗 ProjectDetails: Navigating to analysis page...');
       navigate('/ProjectsManagement/ProjectAnalysis');
       
     } catch (error) {
@@ -200,15 +208,20 @@ const ProjectsManagement = () => {
                 >
                   Cancel
                 </Button>
-                <Button 
-                  type="submit" 
-                  variant="neon" 
-                  size="lg"
-                  disabled={!isFormValid || loading}
-                  className={!isFormValid ? "opacity-50 cursor-not-allowed" : ""}
-                >
-                  {loading ? "Creating..." : "Create Project"}
-                </Button>
+                <div className="flex flex-col items-end gap-2">
+                  <Button 
+                    type="submit" 
+                    variant="neon" 
+                    size="lg"
+                    disabled={!isFormValid || loading}
+                    className={!isFormValid ? "opacity-50 cursor-not-allowed" : ""}
+                  >
+                    {loading ? "Creating..." : "Create & Analyze Project"}
+                  </Button>
+                  <p className="text-xs text-muted-foreground text-right">
+                    After creation, you'll be taken to AI-powered project analysis
+                  </p>
+                </div>
               </div>
             </form>
           </CardContent>

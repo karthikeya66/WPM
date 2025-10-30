@@ -1,13 +1,15 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { Send, Sparkles, ArrowLeft, History, Trash2, RefreshCw } from "lucide-react";
+import { Send, Sparkles, ArrowLeft, History, Trash2, RefreshCw, Download } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { chatService } from "@/services/chatService";
 import { projectService, Project } from "@/services/projectService";
+import { buildProjectContext, buildGeminiPrompt } from "@/utils/projectContextBuilder";
+import { notify } from "@/utils/notifications";
+import ReactMarkdown from "react-markdown";
 
 interface Message {
   id: number;
@@ -32,15 +34,34 @@ const ProjectChat = () => {
   const [showHistory, setShowHistory] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [userProjects, setUserProjects] = useState<Project[]>([]);
+  const [currentProjectContext, setCurrentProjectContext] = useState<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    if (!isTyping) scrollToBottom();
+  }, [messages, isTyping]);
+
+  // Auto-focus input on mount
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  // Debounced send handler to prevent rapid API calls
+  const handleSend = useCallback(() => {
+    if (debounceTimeout.current) {
+      clearTimeout(debounceTimeout.current);
+    }
+
+    debounceTimeout.current = setTimeout(() => {
+      sendMessage();
+    }, 300);
+  }, [inputMessage, user, userProjects]);
 
   // Load chat history and user projects on component mount
   useEffect(() => {
@@ -55,6 +76,7 @@ const ProjectChat = () => {
         let newProjectInfo = null;
         if (newProjectData) {
           newProjectInfo = JSON.parse(newProjectData);
+          setCurrentProjectContext(newProjectInfo);
           sessionStorage.removeItem('newProjectData'); // Clear after reading
         }
 
@@ -63,6 +85,7 @@ const ProjectChat = () => {
         let selectedProjectInfo = null;
         if (selectedProjectData) {
           selectedProjectInfo = JSON.parse(selectedProjectData);
+          setCurrentProjectContext(selectedProjectInfo);
           sessionStorage.removeItem('selectedProjectData'); // Clear after reading
         }
 
@@ -136,7 +159,7 @@ const ProjectChat = () => {
         }
       } catch (error) {
         console.error('Failed to load data:', error);
-        toast.error('Failed to load previous conversations and projects');
+        notify.apiError(error, 'Failed to load previous conversations and projects');
       } finally {
         setIsLoadingHistory(false);
       }
@@ -145,7 +168,53 @@ const ProjectChat = () => {
     loadData();
   }, [user]);
 
-  const handleSend = async () => {
+  const exportPlanAsMarkdown = () => {
+    try {
+      const projectTitle = currentProjectContext?.title || 'project';
+      const plan = messages
+        .map(m => {
+          const sender = m.sender === 'user' ? '**You**' : '**AI Assistant**';
+          const time = m.timestamp.toLocaleString();
+          return `### ${sender} (${time})\n\n${m.text}\n`;
+        })
+        .join('\n---\n\n');
+
+      const fullContent = `# ${projectTitle} - Project Plan\n\n${plan}`;
+
+      const blob = new Blob([fullContent], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${projectTitle.replace(/\s+/g, '-').toLowerCase()}-plan.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      notify.success('Plan exported successfully!');
+    } catch (error) {
+      console.error('Export failed:', error);
+      notify.error('Failed to export plan');
+    }
+  };
+
+  const getTeamRoleSuggestions = (teamSize: number) => {
+    const roleMap: { [key: number]: string[] } = {
+      1: ['Full-Stack Developer (Solo)'],
+      2: ['Frontend Developer', 'Backend Developer'],
+      3: ['Frontend Developer', 'Backend Developer', 'UI/UX Designer'],
+      4: ['Frontend Developer', 'Backend Developer', 'UI/UX Designer', 'QA Engineer'],
+      5: ['Frontend Lead', 'Backend Lead', 'UI/UX Designer', 'QA Engineer', 'DevOps/PM'],
+    };
+
+    if (teamSize <= 5) {
+      return roleMap[teamSize];
+    }
+
+    // For larger teams
+    const baseRoles = ['Frontend Developers', 'Backend Developers', 'UI/UX Team', 'QA Team', 'DevOps/Infrastructure', 'Project Manager'];
+    return baseRoles;
+  };
+
+  const sendMessage = async () => {
     if (!inputMessage.trim()) return;
 
     const newMessage: Message = {
@@ -195,6 +264,35 @@ ${JSON.stringify(JSON.parse(selectedProjectData), null, 2)}
 - Suggesting next steps based on the project's current status and progress
 ` : '';
 
+      // Get team role suggestions if we have project context
+      let teamRoleContext = '';
+      if (currentProjectContext && currentProjectContext.teamMembers) {
+        const roles = getTeamRoleSuggestions(currentProjectContext.teamMembers);
+        teamRoleContext = `
+
+## TEAM COMPOSITION SUGGESTIONS:
+For a team of ${currentProjectContext.teamMembers} member${currentProjectContext.teamMembers > 1 ? 's' : ''}, consider these roles:
+${roles.map((role, idx) => `${idx + 1}. ${role}`).join('\n')}
+
+${currentProjectContext.teamMembers > 1 ? `
+**TEAM DISTRIBUTION GUIDELINES:**
+- Break down the project into ${currentProjectContext.teamMembers} parallel workstreams
+- Assign tasks based on the suggested role distribution above
+- Create a dependency chart showing which tasks must be completed before others
+- Suggest daily sync points for team coordination (e.g., 15-min standup)
+- Provide a merger/integration plan for combining everyone's work
+- Identify potential bottlenecks where team members might block each other
+- Suggest code review and collaboration workflows
+` : `
+**SOLO DEVELOPER GUIDELINES:**
+- Break tasks into small, manageable chunks (2-4 hours each)
+- Prioritize tasks that can be completed independently
+- Suggest a realistic timeline accounting for solo development pace
+- Recommend tools and practices for solo developers (version control, testing, documentation)
+- Include buffer time for debugging and learning
+`}`;
+      }
+
       // Prepare user project context
       const projectContext = userProjects.length > 0 ? `
 
@@ -242,7 +340,7 @@ The user has no existing projects in their workspace. This appears to be their f
               parts: [{
                 text: `You are an expert Project Analysis and Planning Consultant for Project Catalyst - a comprehensive project management platform. Your role is to help users create detailed project workflows by gathering comprehensive information.
 
-${newProjectContext}${selectedProjectContext}${projectContext}
+${newProjectContext}${selectedProjectContext}${projectContext}${teamRoleContext}
 
 ## SYSTEM CONTEXT & LIMITATIONS:
 Project Catalyst is a full-stack application with the following technical stack and constraints:
@@ -282,7 +380,18 @@ Project Catalyst is a full-stack application with the following technical stack 
 - No project sharing or team collaboration features
 - Local deployment only (no cloud hosting configured)
 
-## YOUR ROLE:
+## BEGINNER-FRIENDLY APPROACH:
+This platform is designed for beginners who are learning to build projects. Please:
+- **Explain technical terms simply** with brief definitions
+- **Provide learning resources** for each major phase (free YouTube channels, documentation links, tutorials)
+- **Suggest realistic timelines** - beginners typically take 2-3x longer than experienced developers
+- **Include common pitfalls** specific to beginners and how to avoid them
+- **Break tasks into very small steps** - each task should take no more than 4-6 hours for a beginner
+- **Recommend free tools and resources** (VS Code extensions, Chrome DevTools, free design tools)
+- **Explain the "why"** behind each recommendation to help them learn
+- **Use encouraging language** and celebrate small wins
+
+## YOUR ROLE & OUTPUT FORMAT:
 When a user describes their project, you should:
 
 1. **Understand the Context**: Remember that this project will be created within Project Catalyst system with the above limitations.
@@ -297,23 +406,66 @@ When a user describes their project, you should:
    - Integration needs (within our current tech stack)
    - Target audience or users
 
-3. **Create Realistic Recommendations** that:
-   - Work within our current technology stack
-   - Consider our system limitations
-   - Suggest features that can be built with React/Node.js/MongoDB
-   - Provide actionable steps for implementation
-   - Include realistic timeline estimates
-   - Account for our current authentication and user management constraints
+3. **Create Structured Recommendations** using this format:
 
-4. **Provide Structured Output** including:
-   - Project phases and milestones
-   - Task breakdown with priorities
-   - Technology recommendations (within our stack)
-   - Implementation approach
-   - Potential challenges and solutions
-   - Best practices for our platform
+## 📋 Project Overview
+[Brief 2-3 sentence summary of the project and its goals]
 
-Be conversational, thorough, and ask follow-up questions. Guide the user step-by-step to build a comprehensive project plan that can realistically be implemented within Project Catalyst's current capabilities.
+## 👥 Team Structure & Roles
+${currentProjectContext?.teamMembers > 1 ? '[Break down roles and responsibilities for each team member]' : '[Solo developer roadmap with time management tips]'}
+
+## 🎯 Project Phases & Timeline
+
+### Phase 1: [Phase Name] (Estimated: X weeks)
+**Goal:** [What this phase accomplishes]
+
+${currentProjectContext?.teamMembers > 1 ? `
+**Team Member 1 (Role):**
+- [ ] Task 1 (Estimated: X hours) - [Brief description and why it's important]
+- [ ] Task 2 (Estimated: X hours)
+
+**Team Member 2 (Role):**
+- [ ] Task 1 (Estimated: X hours)
+- [ ] Task 2 (Estimated: X hours)
+
+**🔗 Integration Points:** [Where team members' work comes together]
+**⚠️ Potential Blockers:** [Dependencies between team tasks]
+` : `
+**Tasks:**
+- [ ] Task 1 (Estimated: X hours) - [Brief description with learning resources]
+- [ ] Task 2 (Estimated: X hours)
+
+**💡 Beginner Tips:** [Specific advice for this phase]
+**📚 Learning Resources:** [Free resources to help complete this phase]
+`}
+
+[Repeat for each phase]
+
+## 🔧 Technical Implementation
+- **Tech Stack:** [Specific technologies within React/Node.js/MongoDB]
+- **Key Libraries:** [Specific npm packages to use]
+- **Development Workflow:** [Git workflow, testing approach, deployment]
+
+## 🚀 Daily/Weekly Workflow
+${currentProjectContext?.teamMembers > 1 ? '[Team coordination schedule, standup format, code review process]' : '[Solo developer schedule with time blocking suggestions]'}
+
+## ⚠️ Common Challenges & Solutions
+[Specific to this project type and beginner level]
+
+## 📈 Success Metrics
+[How to measure progress and completion]
+
+**CRITICAL FORMATTING RULES:**
+- Use checkboxes [ ] for all actionable tasks
+- Include time estimates for every task
+- Add emoji icons for visual clarity (📋 🎯 👥 🔧 ⚠️ 💡 📚)
+- Keep sections clear and scannable
+- For teams > 1: Always separate tasks by team member
+- For solo: Group related tasks together logically
+- Always include learning resources for beginners
+- Explain technical decisions in simple terms
+
+Be conversational, thorough, and ask follow-up questions when you need more information. Guide the user step-by-step to build a comprehensive project plan that can realistically be implemented within Project Catalyst's current capabilities.
 
 **API Key Used**: AIzaSyDhntT70uByTK-K0ql-7dUzsIJXLRuUYPs (Gemini 2.0 Flash Experimental)
 
@@ -360,15 +512,15 @@ User message: ${userMessageText}`
             projectId,
             projectTitle
           );
-          toast.success('Chat saved successfully');
+          notify.success('Chat saved successfully');
         } catch (dbError) {
           console.error('Failed to save chat to database:', dbError);
-          toast.error('Failed to save chat history');
+          notify.error('Failed to save chat history');
         }
       }
     } catch (error: any) {
       console.error("Chat error:", error);
-      toast.error(error.message || "Failed to get response");
+      notify.apiError(error, "Failed to get response");
 
       const errorMessage: Message = {
         id: messages.length + 2,
@@ -404,10 +556,10 @@ User message: ${userMessageText}`
         ...prev.slice(1) // Keep all messages except the first greeting
       ]);
 
-      toast.success('Project data refreshed');
+      notify.success('Project data refreshed');
     } catch (error) {
       console.error('Failed to refresh project data:', error);
-      toast.error('Failed to refresh project data');
+      notify.error('Failed to refresh project data');
     }
   };
 
@@ -426,11 +578,11 @@ User message: ${userMessageText}`
 
         // Clear only this project's history
         await chatService.deleteUserChatHistory(user._id, 'project-planning', projectId, projectTitle);
-        toast.success(`Chat history cleared for "${projectTitle}"`);
+        notify.success(`Chat history cleared for "${projectTitle}"`);
       } else {
         // Clear all project planning history (backward compatibility)
         await chatService.deleteUserChatHistory(user._id, 'project-planning');
-        toast.success('Chat history cleared');
+        notify.success('Chat history cleared');
       }
 
       // Refresh project data and set appropriate greeting
@@ -438,7 +590,7 @@ User message: ${userMessageText}`
 
     } catch (error) {
       console.error('Failed to clear chat history:', error);
-      toast.error('Failed to clear chat history');
+      notify.error('Failed to clear chat history');
     }
   };
 
@@ -466,10 +618,15 @@ User message: ${userMessageText}`
               <div>
                 <h1 className="text-xl font-semibold gradient-text">AI Project Planner</h1>
                 <p className="text-sm text-muted-foreground">
-                  {userProjects.length > 0
-                    ? `Analyzing ${userProjects.length} project${userProjects.length > 1 ? 's' : ''} • Let's build something amazing`
-                    : "Let's build something amazing"
-                  }
+                  {currentProjectContext ? (
+                    <>
+                      📋 {currentProjectContext.title} • {currentProjectContext.teamMembers} member{currentProjectContext.teamMembers !== 1 ? 's' : ''}
+                    </>
+                  ) : userProjects.length > 0 ? (
+                    `Analyzing ${userProjects.length} project${userProjects.length > 1 ? 's' : ''} • Let's build something amazing`
+                  ) : (
+                    "Let's build something amazing"
+                  )}
                 </p>
               </div>
             </div>
@@ -478,11 +635,21 @@ User message: ${userMessageText}`
             <Button
               variant="ghost"
               size="sm"
+              onClick={exportPlanAsMarkdown}
+              className="text-muted-foreground hover:text-primary"
+              disabled={messages.length <= 1}
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export Plan
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={refreshProjectData}
               className="text-muted-foreground hover:text-primary"
             >
               <RefreshCw className="w-4 h-4 mr-2" />
-              Refresh Projects
+              Refresh
             </Button>
             <Button
               variant="ghost"
@@ -491,7 +658,7 @@ User message: ${userMessageText}`
               className="text-muted-foreground hover:text-destructive"
             >
               <Trash2 className="w-4 h-4 mr-2" />
-              Clear History
+              Clear
             </Button>
           </div>
         </div>
@@ -511,7 +678,9 @@ User message: ${userMessageText}`
                   : "glass-intense border border-primary/20"
                   }`}
               >
-                <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+                <div className="text-sm prose prose-sm max-w-none dark:prose-invert">
+                  <ReactMarkdown>{message.text}</ReactMarkdown>
+                </div>
                 <p className="text-xs opacity-60 mt-2">
                   {message.timestamp.toLocaleTimeString([], {
                     hour: "2-digit",
@@ -549,10 +718,16 @@ User message: ${userMessageText}`
         <div className="max-w-5xl mx-auto p-4">
           <div className="flex gap-3">
             <Input
+              ref={inputRef}
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
-              onKeyPress={(e) => e.key === "Enter" && handleSend()}
-              placeholder="Type your message..."
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              placeholder="Type your message... (Shift+Enter for new line)"
               className="glass border-primary/30 focus:border-primary text-base py-6"
               disabled={isTyping}
             />

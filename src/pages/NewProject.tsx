@@ -43,38 +43,59 @@ const NewProject = () => {
   // Check for project data from the form and initialize conversation
   useEffect(() => {
     const newProjectData = sessionStorage.getItem('newProjectData');
+    console.log('🔗 NewProject: Checking for project data from ProjectDetails form:', newProjectData);
+    
     if (newProjectData) {
       const projectInfo = JSON.parse(newProjectData);
+      console.log('✅ NewProject: Found project data from form:', projectInfo);
       
       // Set initial message with project analysis
       const initialMessage: Message = {
         id: 1,
-        text: `🎉 Excellent! I've received your project details:
+        text: `🎉 Excellent! I've received your project details from the Project Details form:
 
 **Project**: ${projectInfo.title}
 **Team Size**: ${projectInfo.teamMembers} member${projectInfo.teamMembers > 1 ? 's' : ''}
 **Description**: ${projectInfo.description || 'No description provided'}
 **Deadline**: ${projectInfo.deadline ? new Date(projectInfo.deadline).toLocaleDateString() : 'No deadline set'}
+**Created**: ${projectInfo.createdAt ? new Date(projectInfo.createdAt).toLocaleDateString() : 'Just now'}
 
-Now let's dive deep into planning your project! I'll help you create a comprehensive roadmap, break down tasks, and provide technical guidance. 
+Perfect! Your project has been successfully created and saved to the database. Now let's dive deep into planning and analysis! 
+
+I'll help you create a comprehensive roadmap, break down tasks, and provide technical guidance tailored to your project. 
 
 What specific aspect would you like to focus on first? For example:
-- Technical architecture and technology stack
-- Project phases and milestones  
-- Task breakdown and timeline
-- Team roles and responsibilities
-- Risk assessment and mitigation`,
+- 🏗️ Technical architecture and technology stack recommendations
+- 📋 Project phases and milestone planning
+- ⏰ Detailed task breakdown and timeline estimation
+- 👥 Team roles and responsibility distribution
+- ⚠️ Risk assessment and mitigation strategies
+- 🎯 Success metrics and deliverable definitions
+
+Just let me know what interests you most, or ask me anything about your project!`,
         sender: "ai",
         timestamp: new Date(),
       };
       
       setMessages([initialMessage]);
-      sessionStorage.removeItem('newProjectData'); // Clear after using
+      // Keep the data for potential reference during the conversation
+      // sessionStorage.removeItem('newProjectData'); // Don't clear immediately
     } else {
-      // No project data, show default message
+      // No project data, show default message with guidance
       const defaultMessage: Message = {
         id: 1,
-        text: "Hello! I'm here to help you analyze and plan your project. It looks like you haven't created a project yet. Please go back to the Projects Management page to create a project first, then return here for detailed analysis and planning.",
+        text: `Hello! I'm your AI Project Analysis Assistant. 
+
+I notice you haven't created a project through the Project Details form yet. To get the most out of this analysis session, I recommend:
+
+1. **Go back to Project Details** (http://localhost:8080/ProjectDetails)
+2. **Fill out your project information** (title, team size, description, deadline)
+3. **Submit the form** - this will create your project in the database
+4. **Return here automatically** for detailed AI-powered analysis
+
+Alternatively, if you want to start fresh with a conversational project creation, I can help you create a project right here by asking you questions. Just tell me about your project idea!
+
+What would you prefer to do?`,
         sender: "ai",
         timestamp: new Date(),
       };
@@ -102,7 +123,9 @@ What specific aspect would you like to focus on first? For example:
         title: data.title.trim(),
         description: data.description?.trim() || "No description provided",
         teamMembers: data.teamMembers,
-        deadline: data.deadline || null
+        deadline: data.deadline ? new Date(data.deadline) : null,
+        status: 'active' as const,
+        progress: 0
       };
 
       const newProject = await projectService.createProject(projectPayload);
@@ -156,28 +179,55 @@ What specific aspect would you like to focus on first? For example:
           body: JSON.stringify({
             contents: [{
               parts: [{
-                text: `You are a Project Creation Assistant for Project Catalyst. Your role is to help users create new projects through conversational interaction.
+                text: `You are a Project Analysis and Planning Assistant for Project Catalyst. You have two main functions:
 
-## YOUR MISSION:
-Guide the user through creating a project by gathering the following REQUIRED information:
+## FUNCTION 1: PROJECT ANALYSIS (Primary)
+If the user came from the Project Details form (indicated by existing project data), provide comprehensive project analysis and planning assistance.
+
+## FUNCTION 2: CONVERSATIONAL PROJECT CREATION (Secondary)
+If no project exists, help create one through conversation.
+
+## CURRENT PROJECT DATA FROM FORM:
+${sessionStorage.getItem('newProjectData') ? JSON.parse(sessionStorage.getItem('newProjectData')!) : 'No project data from form'}
+
+## CONVERSATIONAL PROJECT DATA COLLECTED SO FAR:
+${JSON.stringify(projectData, null, 2)}
+
+## CONVERSATION HISTORY:
+${messages.map(msg => `${msg.sender.toUpperCase()}: ${msg.text}`).join('\n')}
+
+## PRIMARY MODE - PROJECT ANALYSIS:
+If project data exists from the form, focus on:
+- Detailed project analysis and strategic planning
+- Technical architecture recommendations
+- Task breakdown and timeline estimation
+- Risk assessment and mitigation strategies
+- Team organization and role distribution
+- Success metrics and milestone planning
+
+## SECONDARY MODE - PROJECT CREATION:
+If no project data exists, guide the user through creating a project by gathering:
 1. **Project Title** (required) - A clear, descriptive name
 2. **Team Size** (required) - Number of team members (minimum 1)
-
-And these OPTIONAL details:
 3. **Description** (optional) - What the project is about
 4. **Deadline** (optional) - When they want to complete it
 
-## CURRENT PROJECT DATA COLLECTED:
-${JSON.stringify(projectData, null, 2)}
-
 ## CONVERSATION RULES:
-1. **Be conversational and friendly** - Ask questions naturally, like a helpful colleague
-2. **Ask ONE question at a time** - Don't overwhelm the user
-3. **Validate information** - If they provide unclear info, ask for clarification
-4. **Show progress** - Let them know what info you still need
-5. **Be encouraging** - Make the process feel easy and exciting
+1. **REMEMBER THE CONVERSATION** - Look at the conversation history above to understand what has been discussed
+2. **Be conversational and friendly** - Ask questions naturally, like a helpful colleague
+3. **Ask ONE question at a time** - Don't overwhelm the user
+4. **Validate information** - If they provide unclear info, ask for clarification
+5. **Show progress** - Let them know what info you still need
+6. **Be encouraging** - Make the process feel easy and exciting
+7. **DON'T REPEAT QUESTIONS** - If you already asked something, don't ask again
 
-## WHEN YOU HAVE REQUIRED INFO:
+## INFORMATION EXTRACTION:
+Based on the conversation history, extract any project information the user has provided:
+- If they mentioned a project title (like "Club Bot"), use it
+- If they mentioned team size (like "20"), use it
+- If they mentioned description or other details, use them
+
+## WHEN IN CREATION MODE AND YOU HAVE REQUIRED INFO:
 Once you have both Title and Team Size, offer to create the project:
 "Great! I have everything I need:
 - Title: [title]
@@ -193,10 +243,11 @@ If the user says "yes", "create project", "create it", or similar confirmation a
 
 ## CONTEXT:
 - This is Project Catalyst, a React/Node.js/MongoDB project management platform
-- Projects will be stored in MongoDB and appear on their dashboard
-- After creation, they'll be taken to an AI planning assistant
+- Projects are stored in MongoDB and appear on the dashboard
+- Users can create projects via the Project Details form OR through this conversational interface
+- After creation, users can continue with detailed planning and analysis
 
-User message: ${userMessageText}`
+Current user message: ${userMessageText}`
               }]
             }]
           }),
@@ -223,6 +274,45 @@ User message: ${userMessageText}`
       const deadlineMatch = aiResponseText.match(/Deadline:\s*([^\n]+)/i);
       
       const updatedProjectData = { ...projectData };
+      
+      // Also extract from user message directly if AI didn't capture it
+      if (!updatedProjectData.title) {
+        // Look for project titles in user message
+        const userTitlePatterns = [
+          /project.*?(?:called|named|titled)\s+["']?([^"'\n]+)["']?/i,
+          /(?:it's|its)\s+["']?([^"'\n]+)["']?/i,
+          /["']([^"'\n]+)["']?\s+project/i
+        ];
+        
+        for (const pattern of userTitlePatterns) {
+          const match = userMessageText.match(pattern);
+          if (match && match[1]) {
+            updatedProjectData.title = match[1].trim();
+            break;
+          }
+        }
+        
+        // Simple case: if user just says a name like "Club Bot"
+        if (!updatedProjectData.title && userMessageText.length < 50 && !userMessageText.includes(' ')) {
+          const words = userMessageText.trim().split(/\s+/);
+          if (words.length <= 3 && words.every(word => /^[a-zA-Z0-9]+$/.test(word))) {
+            updatedProjectData.title = userMessageText.trim();
+          }
+        }
+      }
+      
+      if (!updatedProjectData.teamMembers) {
+        // Look for numbers in user message that could be team size
+        const numberMatch = userMessageText.match(/\b(\d+)\b/);
+        if (numberMatch) {
+          const num = parseInt(numberMatch[1]);
+          if (num > 0 && num <= 100) { // reasonable team size
+            updatedProjectData.teamMembers = num;
+          }
+        }
+      }
+      
+      // Update from AI response
       if (titleMatch && titleMatch[1] && !titleMatch[1].includes('Not specified')) {
         updatedProjectData.title = titleMatch[1].trim();
       }
@@ -236,6 +326,7 @@ User message: ${userMessageText}`
         updatedProjectData.deadline = deadlineMatch[1].trim();
       }
       
+      console.log('🔄 Updated project data:', updatedProjectData);
       setProjectData(updatedProjectData);
       
       const aiResponse: Message = {
@@ -285,15 +376,54 @@ User message: ${userMessageText}`
               </div>
               <div>
                 <h1 className="text-xl font-semibold gradient-text">Project Analysis & Creation</h1>
-                <p className="text-sm text-muted-foreground">AI-powered project planning and creation</p>
+                <p className="text-sm text-muted-foreground">
+                  {sessionStorage.getItem('newProjectData') 
+                    ? "AI-powered analysis for your project from Project Details" 
+                    : "AI-powered project planning and creation"}
+                </p>
               </div>
             </div>
           </div>
-          {(projectData.title || projectData.teamMembers) && (
-            <div className="text-sm text-muted-foreground">
-              Progress: {[projectData.title, projectData.teamMembers].filter(Boolean).length}/2 required fields
-            </div>
-          )}
+          <div className="flex items-center gap-3">
+            {(projectData.title || projectData.teamMembers) && (
+              <div className="text-sm text-muted-foreground">
+                Progress: {[projectData.title, projectData.teamMembers].filter(Boolean).length}/2 required fields
+              </div>
+            )}
+            {!sessionStorage.getItem('newProjectData') && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate("/ProjectDetails")}
+                  className="text-xs"
+                >
+                  Create Project First
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setMessages([]);
+                    setProjectData({});
+                    // Re-initialize with fresh message
+                    setTimeout(() => {
+                      const defaultMessage: Message = {
+                        id: 1,
+                        text: "Hello! I'm your AI Project Analysis Assistant. Let's start fresh! What would you like to name your project?",
+                        sender: "ai",
+                        timestamp: new Date(),
+                      };
+                      setMessages([defaultMessage]);
+                    }, 100);
+                  }}
+                  className="text-xs"
+                >
+                  Reset Chat
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -377,7 +507,7 @@ User message: ${userMessageText}`
             <Input
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
-              onKeyPress={(e) => e.key === "Enter" && handleSend()}
+              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
               placeholder="Tell me about your project idea..."
               className="glass border-primary/30 focus:border-primary text-base py-6"
               disabled={isTyping || isCreatingProject}
