@@ -12,7 +12,9 @@ export interface Project {
 }
 
 class ProjectService {
-  private apiUrl = 'http://localhost:3001/api';
+  private apiUrl = process.env.NODE_ENV === 'production' 
+    ? '/api' 
+    : 'http://localhost:3001/api';
 
   /**
    * Get all projects for a user

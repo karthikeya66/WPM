@@ -17,7 +17,9 @@ export interface ChatSession {
 }
 
 class ChatService {
-  private apiUrl = 'http://localhost:3001/api';
+  private apiUrl = process.env.NODE_ENV === 'production' 
+    ? '/api' 
+    : 'http://localhost:3001/api';
 
   /**
    * Save a chat message and response to the database
