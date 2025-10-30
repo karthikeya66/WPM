@@ -13,7 +13,12 @@
     "preview": "vite preview",
     "db:init": "tsx src/config/initDB.ts",
     "db:seed": "tsx src/config/seedDB.ts",
-    "vercel-build": "npm run build"
+    "vercel-build": "npm run build",
+    "render-build": "npm install && npm run build",
+    "start": "npm run server"
+  },
+  "overrides": {
+    "@radix-ui/react-alert-dialog": "1.1.14"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

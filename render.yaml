@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: catalyst-neo-core
+    env: node
+    buildCommand: npm run render-build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        fromDatabase:
+          name: mongodb
+          property: connectionString
+      - key: GEMINI_API_KEY
+        sync: false
+    healthCheckPath: /api/health
